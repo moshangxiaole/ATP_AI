@@ -1,0 +1,141 @@
+sequenceDiagram
+    autonumber
+    participant EX as Executor._run_step
+    participant PS as PageStabilizer
+    participant DR as BaseDriver
+    participant PM as PopupMemory
+    participant PG as dismiss_popups / PopupGuard
+    participant LC as resolve + scroll_find + heal
+    participant JD as Judge
+    participant DD as DeviationDetector
+    participant BC as BackController
+    participant ST as PageStack
+    participant EV as EventSink (_emit)
+
+    Note over EX,EV: ① 稳定观测（FR-1）：严格「树稳定 → 截图 → 操作」；两级签名不可混用（PRD v1.1 §3.3.0）：fine_fp 含 bounds 只判稳定；coarse_sig 不含 bounds 且排除动态节点，只判页面身份
+    EX->>PS: stable_observe(reason="step", ceiling_ms=None, has_target=step.needs_target, budget_ms=剩余 step.timeout_ms)
+    loop 每轮首行 check_cancel()；树-only，screenshot 次数=0
+        PS->>DR: dump_tree()（observe_tree with_shot=False）
+        DR-->>PS: root, tree_stale
+        PS->>PS: 组合判据：节点数稳定(薄树节点数少于20 判未稳定 AC-1.11) + 连续2次 fine_fp 一致 + tree_stale=False + 无 loading；禁止用 coarse_sig 冒充稳定
+    end
+    alt 命中 reuse 窗口（500ms/指纹未变/期间无动作）
+        PS-->>EX: StableResult(stable=True, reused=True, wait_ms=0)
+    else 稳定达成
+        PS->>DR: screenshot()（取且仅取一次）
+        DR-->>PS: bytes
+        PS-->>EX: StableResult(stable=True, obs, wait_ms, tree_polls)
+        PS->>EV: page_ready{step_id, reason, stable, wait_ms, tree_polls, fine_fp, coarse_sig_sim, degraded, reused}
+    else 超时 / tree_stale 持续 / not_idle（fail-closed）
+        PS->>EV: page_ready_timeout{step_id, reason, wait_ms, tree_polls, last_fine_fp, policy, tap_skipped=true}
+        PS-->>EX: StableResult(stable=False, error=page_unstable|unsupported_page|page_unstable_degraded)
+        Note over EX: has_target=True → status=failed, error=page_unstable, tap_xy 次数=0<br/>绝不按缓存树点击；不得写入 PageStack；播放页记 unstable_fingerprints<br/>超时=不静默 + 明确打标/发事件 + 禁止「为了稳而把细粒度判据换成粗粒度签名」
+        EX-->>EX: return failed（本步终止）
+    end
+    EX->>EX: 写 before 证据图 / step.evidence.tree_hash = fine_fp(obs)
+    EX->>ST: push(PageFrame{step_id, fine_fp, coarse_sig, package, before_shot, at})
+    EX->>EV: page_stack_push{step_id, fine_fp, coarse_sig, package, before_shot, at}（P1）
+
+    Note over EX,PG: ② 弹窗决策（FR-3）：快路径省扫描、不省校验
+    EX->>PG: dismiss_popups(driver, obs, guard, memory, stabilizer, ctx)
+    PG->>PM: enabled_for(platform, app_id, mode)
+    alt 允许且 fast_path_enabled
+        PG->>PM: match_active(platform, app_id, obs) 定向检索（不调 PopupGuard.find，rounds=1）
+        alt 命中 active 条目
+            PM-->>PG: (entry, 重定位信息)
+            PG->>DR: _fresh_obs() 新鲜树 + 校验 tree_stale is False
+            PG->>PG: ①按 close_node 稳定属性在当前树重定位 ②当前 bounds 算点击点<br/>③DANGER_WORDS + _is_description + _onscreen 复核
+            alt 五步校验全过
+                PG->>DR: tap_xy(x,y)
+                PG->>DR: 效果确认：树-only 采样，签名节点是否消失
+                PG->>EV: popup_memory_hit{sig, saved_scan=true, source=popup_memory}
+                PG->>EV: popup_dismissed{source=popup_memory, verified=true, sig}
+                PG->>PM: observe_success(ctx, sig, ...) → pending 置信累计
+            else 任一不成立（node_not_found / danger / tree_stale / effect_not_verified）
+                PG->>PM: miss(sig, reason) → misses++ / disabled / retired
+                PG->>EV: popup_memory_miss{sig, reason, misses}
+                Note over PG: 本步不点击或已点击交由偏离纠正；立即回退完整全量决策，本步不再重试该条目
+                PG->>PG: 完整 PopupGuard.find() + rounds 全量决策
+            end
+        else 未命中
+            PG->>PG: 完整 PopupGuard.find() + 二次抓树 + rounds 全量决策
+            PG->>EV: popup_dismissed{source=guard, verified=true}
+            PG->>PM: observe_success(...) 仅来自全量决策路径
+        end
+    else 禁用 / AI 首跑 / 未开灰度
+        PG->>PG: 原路径逐字不变（guard.find + rounds）；首跑只写不读
+    end
+    PG-->>EX: (obs_after_popup, done[])
+    Note over EX,PS: 弹窗若真的点了 → 必须重新过门禁，但命中 reuse / max(剩余上限)，绝不叠加等待（AC-1.8）
+    EX->>PS: stable_observe(reason="popup", ceiling_ms=popup.settle_ms)
+    PS-->>EX: StableResult（通常 reused=True，wait_ms=0）
+
+    Note over EX,LC: ③ 定位 → 执行（顺序绝不改：滑动先于 AI 修复）
+    EX->>LC: resolve(obs.root, strategies) → 未命中则 find_by_scrolling(stabilizer=...)
+    LC->>DR: swipe_xy(swipe_ms=700, swipe_ratio=0.35)；滑动后树-only 稳定采样替代 450ms sleep
+    LC-->>EX: (loc, obs, note)
+    opt 全 miss 且 allow_healing 且 ai_budget>0（唯一慢路径，触发条件不变）
+        EX->>LC: _heal(step, obs, case, art)
+    end
+    EX->>EX: _check_cancel()（动作发出前最后一次）
+    EX->>DR: perform(action, node, args)
+    EX->>PS: invalidate()（清 reuse 缓存）
+    EX->>EV: step 动作已发（既有事件不变）
+
+    Note over EX,JD: ④ 后置断言（dsl witness 优先 / discriminative_post 剔除假证据）
+    EX->>PS: stable_observe(reason="assert", has_target=False)（语义判定前必须等稳定）
+    PS-->>EX: after: StableResult
+    EX->>JD: Judge.check(postcondition, before, after)
+    JD-->>EX: JudgeResult(passed, method, dropped_witness)
+    opt dropped_witness
+        EX->>EV: witness_dropped{step_id, witness}
+    end
+
+    Note over EX,DD: ⑤ 偏离检测（FR-4，P0；前提 after.stable=True 且 stale=False）；AC-1.10：fine_fp 变而 coarse_sig 不变（滚动/动画/局部刷新）不判偏离、不 BACK、不新增页帧
+    EX->>DD: detect(step, before, after, case, driver, popup_changed, assert_passed, model_inflight, aborted, run_backs, step_backs)
+    DD->>DR: foreground_package()（Android 可得；鸿蒙返回 "" 绝不猜）
+    DD->>ST: previous() / current() + coarse_sig Jaccard（签名节点少于8 视为证据不足）
+
+    alt 判为偏离
+        DD->>EV: deviation_detected{step_id, cause, coarse_similarity, expected_sig, actual_sig, expected_fp, actual_fp, package, witness_missing, stable}
+        DD-->>EX: DeviationVerdict(deviated=True, can_back=?)
+    else 正常 / 判据不可信
+        DD-->>EX: DeviationVerdict(deviated=False)
+        EX->>EV: step_finished（既有）
+        EX-->>EX: return StepResult
+    end
+
+    Note over EX,BC: ⑥ 禁止清单 + 自动 BACK（auto_back 默认 false → 只上报不动设备）
+    EX->>DD: check_back_guard(step, verdict, ...)
+    DD-->>EX: (allowed, "rule-N"|"")
+    alt allowed=False（9 条任一命中 / 次数超限 / 置信不足）
+        Note over EX: press_key("back") 次数 = 0（AC-4.6 九/九）
+        EX->>EV: deviation_detected{..., blocked_by=rule-N, action="report_only"}
+        EX-->>EX: return StepResult（不改设备）
+    else allowed=True 且 auto_back=true
+        loop nth = 1..max_back_per_step(2)，且 run_backs < 3；每轮首行 check_cancel()
+            EX->>BC: back_and_verify(target_frame=stack[-2], nth, step_id)
+            BC->>DR: press_key("back")
+            BC->>EV: deviation_back{step_id, nth, target_frame_id, target_fine_fp}
+            BC->>PS: stable_observe(reason="back", has_target=False)
+            PS-->>BC: StableResult
+            BC->>BC: coarse_sig Jaccard ≥ 0.80 且包名一致且 stable=True？
+            alt 验证通过
+                BC->>EV: deviation_recovered{step_id, backs, retry=1, coarse_similarity}
+                BC-->>EX: RecoveryOutcome(recovered=True)
+            else 验证失败
+                BC->>EV: deviation_recovery_failed{step_id, backs, coarse_similarity, reason}
+                Note over BC: 不重跑、不继续点击；仍受次数上限约束
+            end
+        end
+        alt recovered=True 且 retry_current_step=1
+            Note over EX: ⑦ 重跑当前步骤【恰好 1 次】：重新稳定观测 → 弹窗 → 定位 → 执行 → 断言<br/>沿用已 healed 策略，不再新增 _heal；ai_used 不因重跑新增；不新增 StepResult 条目
+            EX->>EX: 重新走 ①~④（不再触发偏离回退）
+            EX->>EV: step_finished；run 级 deviation_backs++；detail += 「偏离纠正：回退 N 次 + 重跑」
+        else
+            EX-->>EX: status=failed，detail 留痕，已有 before/after 证据不清空
+        end
+    end
+    EX->>PM: confirm_window(step_index, ok=status==passed 且后续2步无偏离/超时)
+    EX->>EV: step_finished（既有；payload 不变）
+    EX-->>EX: return StepResult

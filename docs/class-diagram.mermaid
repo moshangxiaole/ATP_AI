@@ -1,0 +1,279 @@
+classDiagram
+    class Config {
+        +page_ready: PageReadyConfig
+        +popup_memory: PopupMemoryConfig
+        +deviation: DeviationConfig
+        +popup: PopupConfig
+        +cold_start: ColdStartConfig
+        +scroll_find: ScrollFindConfig
+        +default_timeout_ms: int
+        +load(home, config_file) Config
+    }
+    class PageReadyConfig {
+        +enabled: bool
+        +platforms: list
+        +min_wait_ms: int
+        +max_wait_ms: int
+        +launch_max_wait_ms: int
+        +max_tree_polls: int
+        +stable_samples: int
+        +reuse_window_ms: int
+        +dynamic_markers: list
+    }
+    class PopupMemoryConfig {
+        +enabled: bool
+        +path: str
+        +readonly: bool
+        +min_hits: int
+        +confidence_min: float
+        +read_in_ai_mode: bool
+        +fast_path_enabled: bool
+    }
+    class DeviationConfig {
+        +enabled: bool
+        +auto_back: bool
+        +sim_threshold: float
+        +recover_match_threshold: float
+        +coarse_sig_min_nodes: int
+        +max_back_per_step: int
+        +max_back_per_run: int
+        +irreversible_markers: list
+    }
+
+    class UINode {
+        +cls: str
+        +id: str
+        +text: str
+        +desc: str
+        +bounds: tuple
+        +walk() Iterator
+        +fingerprint() str
+    }
+    class Observation {
+        +platform: str
+        +width: int
+        +height: int
+        +root: UINode
+        +screenshot: bytes
+        +taken_at: float
+        +fingerprint() str
+    }
+    class BaseDriver {
+        +platform: str
+        +tree_stale: bool
+        +dump_tree() UINode
+        +screenshot() bytes
+        +screen_size() tuple
+        +observe() Observation
+        +wait_idle(timeout_ms) void
+        +tap_xy(x, y) void
+        +press_key(name) void
+        +perform(action, node, args) ActionResult
+        +foreground_package() str
+    }
+
+    class StableResult {
+        +stable: bool
+        +obs: Observation
+        +wait_ms: int
+        +tree_polls: int
+        +fine_fp: str
+        +coarse_sig: frozenset
+        +coarse_sig_sim: float
+        +degraded: bool
+        +timed_out: bool
+        +reused: bool
+        +error: str
+    }
+    class PageFrame {
+        +frame_id: int
+        +step_id: str
+        +fine_fp: str
+        +coarse_sig: frozenset
+        +package: str
+        +before_shot: str
+        +at: float
+        +stable: bool
+        +as_dict() dict
+    }
+    class PageStack {
+        -frames: list
+        +push(frame) void
+        +update_current(...) void
+        +current() PageFrame
+        +previous() PageFrame
+        +frames() list
+        +as_dict() dict
+    }
+    class PageStabilizer {
+        -driver: BaseDriver
+        -cfg: PageReadyConfig
+        -last: StableResult
+        -unstable_fps: set
+        -thin_fps: set
+        +fine_fp(obs) str
+        +coarse_sig(root, markers) frozenset
+        +wait_stable(reason, ceiling_ms, ...) StableResult
+        +stable_observe(reason, ...) StableResult
+        +invalidate() void
+        +note_unstable(fp) void
+        +note_thin(fp) void
+        +is_platform_enabled() bool
+    }
+
+    class PopupHit {
+        +keyword: str
+        +text: str
+        +x: int
+        +y: int
+        +kind: str
+        +node_cls: str
+        +as_dict() dict
+    }
+    class PopupGuard {
+        +extra_close_words: list
+        +limit: int
+        +find(obs) list
+    }
+    class PopupEntry {
+        +sig: str
+        +state: str
+        +hits: int
+        +misses: int
+        +confidence: float
+        +close_node: dict
+        +container: dict
+        +from_dict(d) PopupEntry
+        +to_dict() dict
+        +usable() bool
+    }
+    class PopupContext {
+        +platform: str
+        +app_id: str
+        +mode: str
+        +run_id: str
+        +step_id: str
+        +step_index: int
+    }
+    class PopupMemory {
+        +VERSION: int
+        +degraded: bool
+        +load(cfg, path, ...) PopupMemory
+        +save() void
+        +enabled_for(...) bool
+        +match_active(platform, app_id, obs) tuple
+        +lookup(platform, app_id, sig) PopupEntry
+        +observe_success(ctx, sig, ...) void
+        +confirm_window(step_index, ok) void
+        +flush_pending() void
+        +miss(platform, app_id, sig, reason) void
+    }
+
+    class DeviationVerdict {
+        +deviated: bool
+        +cause: str
+        +coarse_similarity: float
+        +expected_sig: frozenset
+        +actual_sig: frozenset
+        +expected_fp: str
+        +actual_fp: str
+        +coarse_sig_nodes: int
+        +package: str
+        +blocked_by: str
+        +can_back: bool
+    }
+    class RecoveryOutcome {
+        +recovered: bool
+        +backs: int
+        +coarse_similarity: float
+        +reason: str
+    }
+    class DeviationDetector {
+        -cfg: DeviationConfig
+        -stack: PageStack
+        +detect(step, before, after, ...) DeviationVerdict
+        +check_back_guard(...) tuple
+    }
+    class BackController {
+        -stabilizer: PageStabilizer
+        +back_and_verify(target_frame, nth, step_id) tuple
+        +recover(step, case, verdict, ...) RecoveryOutcome
+    }
+
+    class Step {
+        +step_id: str
+        +action: Action
+        +args: dict
+        +postcondition: Postcondition
+        +evidence: Evidence
+        +needs_target() bool
+    }
+    class StepResult {
+        +step_id: str
+        +status: str
+        +latency_ms: int
+        +ai_used: bool
+        +detail: str
+        +error: str
+    }
+    class Executor {
+        -driver: BaseDriver
+        -config: Config
+        -stabilizer: PageStabilizer
+        -memory: PopupMemory
+        -stack: PageStack
+        -detector: DeviationDetector
+        -back_ctl: BackController
+        -run_backs: int
+        +run(case, mode) RunResult
+        -_run_step(idx, step, art, case) StepResult
+        -_dismiss_popups(obs, idx, step) Observation
+        -_settle(deadline) Observation
+        -_post_launch_settle() void
+        -_scroll_find(step, obs, idx) tuple
+        -_heal(step, obs, case, art) list
+        -_emit(type_, payload) void
+        -_check_cancel() void
+    }
+    class AiRunner {
+        -stabilizer: PageStabilizer
+        -memory: PopupMemory
+        -_thin_ok: set
+        -_settle_ready(obs) Observation
+        -_clear_popups(obs) Observation
+        -_settle_obs() Observation
+    }
+
+    Config *-- PageReadyConfig
+    Config *-- PopupMemoryConfig
+    Config *-- DeviationConfig
+    Observation *-- UINode
+    BaseDriver ..> Observation : produces
+    PageStabilizer --> BaseDriver : tree-only polls
+    PageStabilizer ..> StableResult : returns
+    PageStabilizer --> PageReadyConfig
+    PageStack o-- PageFrame
+    PageFrame ..> Observation : before_shot
+    PopupMemory o-- PopupEntry
+    PopupMemory ..> PopupContext
+    PopupMemory ..> Observation : match_active
+    PopupGuard ..> PopupHit : finds
+    DeviationDetector --> PageStack
+    DeviationDetector ..> PageStabilizer : shares coarse_sig generator
+    DeviationDetector ..> DeviationVerdict : returns
+    BackController --> PageStabilizer
+    BackController --> DeviationDetector
+    BackController --> BaseDriver : press_key back
+    BackController ..> RecoveryOutcome : returns
+    Executor --> PageStabilizer
+    Executor --> PopupMemory
+    Executor --> PageStack
+    Executor --> DeviationDetector
+    Executor --> BackController
+    Executor --> Config
+    Executor ..> Step : reads
+    Executor ..> StepResult : writes
+    Executor ..> PopupGuard : via dismiss_popups
+    AiRunner --> PageStabilizer : thin wrapper
+    AiRunner --> PopupMemory : write only
+    AiRunner ..> PopupGuard : via dismiss_popups

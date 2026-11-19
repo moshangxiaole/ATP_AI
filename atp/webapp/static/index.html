@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+  <!-- 空 favicon：避免控制台每次刷新都 404 一条资源 -->
+  <link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ATP · Agent 测试控制台</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="rail">
+    <div class="brand">
+      <div class="logo">A</div>
+      <div class="brand-txt"><b>ATP</b><span>Agent 测试控制台</span></div>
+    </div>
+
+    <!-- 执行终端已并入会话输入框左下角的设备按钮（#exec-device） -->
+
+    <section class="rail-block grow">
+      <div class="rail-title-row">
+        <div class="rail-title">用例资产</div>
+        <span class="count" id="case-count">0</span>
+      </div>
+      <div class="tabs" id="rail-tabs">
+        <button data-tab="cases" class="on">已沉淀</button>
+        <button data-tab="runs">运行历史</button>
+      </div>
+      <div class="rail-list" id="case-list"></div>
+      <div class="rail-list hidden" id="run-list"></div>
+    </section>
+
+    <div class="rail-foot">
+      <div class="status-line"><i id="model-dot"></i><span id="model-text">模型未配置</span></div>
+      <div class="status-line sub" id="tool-line">—</div>
+      <button class="ghost-btn block" id="open-settings">模型设置</button>
+    </div>
+  </aside>
+
+  <main class="workspace">
+    <header class="topbar">
+      <div class="topbar-txt">
+        <h1>对话式执行</h1>
+        <p>自然语言描述场景 → Agent 拆步骤执行 → 截图留存 → 沉淀可回放脚本</p>
+      </div>
+      <div class="pill" id="conn-pill"><i></i><span>就绪</span></div>
+    </header>
+
+    <section class="stream" id="stream">
+      <div class="welcome" id="welcome">
+        <div class="welcome-card">
+          <div class="welcome-tag">闭环 · AI 首跑 → 脚本沉淀 → 用例库回放</div>
+          <h2>说一句话，就能跑一条用例</h2>
+          <p>首次执行由 AI 全程接管并把每一步固化成定位器；下次遇到相同场景，自动命中用例库直接回放，<b>AI 只在异常时才介入</b>。</p>
+          <div class="examples" id="examples"></div>
+          <div class="welcome-tips">
+            <span>执行终端默认 <b>Android</b>，请先连接真机</span>
+            <span>移动端执行时右侧设备面板会实时投屏</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="composer">
+      <div class="composer-inner">
+        <div class="composer-top">
+          <div class="seg" id="mode">
+            <button data-mode="auto" class="on">自动（先查库）</button>
+            <button data-mode="ai">AI 首跑</button>
+            <button data-mode="replay">仅回放</button>
+          </div>
+          <label class="check"><input type="checkbox" id="heal" checked><span>允许 AI 自愈</span></label>
+        </div>
+        <textarea id="nl" rows="2" placeholder="例如：登录阳光 OA，进入待办，打开第一条请假申请，填写同意意见并提交，最后确认审批已提交"></textarea>
+        <div class="composer-foot">
+          <button class="exec-device" id="exec-device" type="button" title="选择执行设备">
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 18.5h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            <span id="exec-device-label">Android</span>
+            <svg class="caret" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <span class="hint">Enter 发送 · Shift + Enter 换行 · 每步留存执行前后截图</span>
+          <button class="primary-btn" id="send">开始执行</button>
+        </div>
+      </div>
+    </footer>
+  </main>
+
+  <!-- 右侧设备面板：未连接时只列设备，连接后显示实时画面 -->
+  <aside class="device-rail" id="device-rail">
+    <div class="dr-grip" id="dr-grip" title="左右拖动调整面板宽度"></div>
+    <header class="dr-head">
+      <div>
+        <h2>设备面板</h2>
+        <p id="dr-sub">未连接设备</p>
+      </div>
+      <span class="dr-dot" id="cast-dot" title="未连接"></span>
+    </header>
+
+    <!-- 未连接：仅显示设备序列号、设备类型与「连接」 -->
+    <section class="dr-idle" id="dr-idle">
+      <div class="dr-list" id="dr-list"></div>
+    </section>
+
+    <!-- 已连接：画面 + 内置导航键 -->
+    <section class="dr-live hidden" id="dr-live">
+      <div class="dr-dev">
+        <b id="cast-device">—</b>
+        <span class="dr-tag" id="cast-platform">Android</span>
+      </div>
+
+      <div class="cast-stage" id="cast-stage">
+        <img id="cast-img" alt="真机实时画面（可直接点击操作）">
+        <canvas id="cast-canvas" class="hidden"></canvas>
+        <div class="cast-ripple" id="cast-ripple"></div>
+        <div class="cast-live hidden" id="cast-live"><i></i>LIVE</div>
+        <div class="cast-feedback hidden" id="cast-action"></div>
+        <div class="cast-nav" id="cast-nav">
+          <button type="button" data-key="recents" title="最近任务" aria-label="最近任务">
+            <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+          <button type="button" data-key="home" title="主页" aria-label="主页">
+            <svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/></svg>
+          </button>
+          <button type="button" data-key="back" title="返回" aria-label="返回">
+            <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+          </button>
+          <button type="button" data-key="power" title="电源" aria-label="电源">
+            <svg viewBox="0 0 24 24"><path d="M12 3v8M7.5 6.5a7 7 0 1 0 9 0"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="cast-meta">
+        <span id="cast-method">—</span>
+        <span id="cast-fps">— fps</span>
+        <span id="cast-size">—</span>
+        <span id="cast-time">未连接</span>
+      </div>
+      <div class="cast-error hidden" id="cast-error"></div>
+
+      <div class="dr-controls">
+        <label class="cast-check">
+          <input type="checkbox" id="cast-auto" checked><span>移动端执行时自动投屏</span>
+        </label>
+        <div class="cast-buttons">
+          <button class="ghost-btn" id="cast-toggle" type="button">断开连接</button>
+          <button class="ghost-btn" id="cast-refresh" type="button">刷新</button>
+        </div>
+      </div>
+    </section>
+  </aside>
+</div>
+
+<div class="drawer-mask" id="drawer-mask"></div>
+<aside class="drawer" id="drawer">
+  <header class="drawer-head">
+    <div>
+      <h2>模型设置</h2>
+      <p>OpenAI 兼容协议，豆包 / 通义 / DeepSeek / 智谱 / 本地 vLLM 均可</p>
+    </div>
+    <button class="icon-btn" id="close-drawer" aria-label="关闭">✕</button>
+  </header>
+
+  <div class="drawer-body">
+    <div class="presets" id="presets"></div>
+
+    <label class="field">
+      <span>Base URL</span>
+      <input id="f-base" placeholder="https://ark.cn-beijing.volces.com/api/v3" autocomplete="off">
+    </label>
+    <label class="field">
+      <span>API Key <em id="key-state"></em></span>
+      <input id="f-key" type="password" placeholder="留空则保持不变" autocomplete="new-password">
+    </label>
+    <div class="field-2">
+      <label class="field">
+        <span>模型名</span>
+        <input id="f-model" list="model-options" placeholder="doubao-seed-1-6-250615 / qwen2.5:7b-instruct"
+               autocomplete="off">
+        <datalist id="model-options"></datalist>
+      </label>
+      <label class="field narrow">
+        <span>温度</span>
+        <input id="f-temp" type="number" min="0" max="2" step="0.1" value="0">
+      </label>
+    </div>
+    <div class="field-2">
+      <label class="field narrow">
+        <span>超时（秒）</span>
+        <input id="f-timeout" type="number" min="5" max="600" step="5" value="60">
+      </label>
+      <label class="field">
+        <span>视觉能力</span>
+        <label class="inline-check">
+          <input id="f-vision-on" type="checkbox" checked>
+          模型支持看图（本地纯文本模型请取消）
+        </label>
+      </label>
+    </div>
+    <label class="field">
+      <span>视觉模型（语义断言用，可留空）</span>
+      <div class="inline-row">
+        <input id="f-vision" placeholder="留空则复用上面的模型" autocomplete="off">
+        <button class="ghost-btn sm" id="list-models" type="button">拉取模型列表</button>
+      </div>
+    </label>
+
+    <div class="field-2">
+      <label class="field">
+        <span>调用限速</span>
+        <label class="inline-check">
+          <input id="f-throttle-on" type="checkbox" checked>
+          免费额度模型请保持开启（否则易被 429 限流）
+        </label>
+      </label>
+      <label class="field narrow">
+        <span>每分钟上限</span>
+        <input id="f-max-per-min" type="number" min="0" max="600" step="1" value="20">
+      </label>
+      <label class="field narrow">
+        <span>最小间隔(ms)</span>
+        <input id="f-min-interval" type="number" min="0" max="60000" step="100" value="1200">
+      </label>
+    </div>
+
+    <div class="test-box" id="test-box">
+      <span class="test-dot"></span>
+      <span id="test-text">尚未测试连接</span>
+    </div>
+
+    <div class="note">
+      配置写入 <code>atp.config.json</code>，密钥以明文保存在本机。也可用环境变量
+      <code>ATP_MODEL_BASE_URL / API_KEY / NAME</code> 覆盖。<br>
+      本地模型（Ollama / LM Studio / vLLM）填 <code>http://127.0.0.1:端口/v1</code>，
+      <b>API Key 可留空</b>，且会自动直连、不走系统代理。
+    </div>
+  </div>
+
+  <footer class="drawer-foot">
+    <button class="ghost-btn" id="test-model">测试连接</button>
+    <button class="primary-btn" id="save-model">保存配置</button>
+  </footer>
+</aside>
+
+<div class="lightbox" id="lightbox">
+  <button class="lb-close" id="lb-close">✕</button>
+  <div class="lb-nav">
+    <button id="lb-prev">‹</button>
+    <span id="lb-label"></span>
+    <button id="lb-next">›</button>
+  </div>
+  <img id="lb-img" alt="步骤截图">
+</div>
+
+<div class="modal-mask" id="case-mask"></div>
+<section class="modal" id="case-modal" role="dialog" aria-modal="true" aria-label="用例执行过程">
+  <header class="modal-head">
+    <div class="modal-title-wrap">
+      <h2 id="cm-title">用例执行过程</h2>
+      <p id="cm-sub"></p>
+    </div>
+    <button class="icon-btn" id="cm-close" aria-label="关闭">✕</button>
+  </header>
+  <div class="modal-body" id="cm-body"></div>
+  <footer class="modal-foot">
+    <button class="ghost-btn" id="cm-delete">删除用例</button>
+    <div class="modal-foot-right">
+      <button class="ghost-btn" id="cm-close2">关闭</button>
+      <button class="primary-btn" id="cm-replay">回放这条用例</button>
+    </div>
+  </footer>
+</section>
+
+<script src="/app.js"></script>
+</body>
+</html>

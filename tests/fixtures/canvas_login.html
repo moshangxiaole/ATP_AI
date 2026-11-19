@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>canvas 登录页（无 DOM 语义，只能靠图像识别）</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #eef1f6; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+// 整个界面都画在 canvas 上：DOM 里只有 <canvas> 一个节点，没有按钮、没有文本、
+// 没有可访问属性 —— 元素定位在这里彻底失效，只能截图 + 图像识别。
+//
+// 布局在固定逻辑坐标系（1280x800）里画，再等比缩放到实际视口。
+// 这正是真实客户端/游戏/大屏的做法，也是"换分辨率脚本还能跑"的前提测法。
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const LW = 1280, LH = 800;
+window.__hits = [];      // 每次点击的坐标与是否命中按钮
+window.__btn = null;     // 按钮在 CSS 像素下的矩形（由逻辑坐标换算）
+
+const BTN = { x: 560, y: 430, w: 160, h: 56 };  // 逻辑坐标
+
+function draw() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = window.innerWidth, h = window.innerHeight;
+  cv.width = Math.round(w * dpr);
+  cv.height = Math.round(h * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  // 等比铺满 + 居中留边
+  const s = Math.min(w / LW, h / LH);
+  const ox = (w - LW * s) / 2, oy = (h - LH * s) / 2;
+
+  ctx.fillStyle = '#eef1f6';
+  ctx.fillRect(0, 0, w, h);
+  ctx.setTransform(dpr * s, 0, 0, dpr * s, dpr * ox, dpr * oy);
+
+  ctx.fillStyle = '#2060b2';
+  ctx.fillRect(0, 0, LW, 64);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '24px "Microsoft YaHei", sans-serif';
+  ctx.fillText('运维管理后台', 40, 42);
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(240, 140, 800, 420);
+  ctx.strokeStyle = '#d5dae3';
+  ctx.strokeRect(240, 140, 800, 420);
+
+  const r = 8, x1 = BTN.x, y1 = BTN.y, x2 = BTN.x + BTN.w, y2 = BTN.y + BTN.h;
+  ctx.beginPath();
+  ctx.moveTo(x1 + r, y1);
+  ctx.lineTo(x2 - r, y1);
+  ctx.quadraticCurveTo(x2, y1, x2, y1 + r);
+  ctx.lineTo(x2, y2 - r);
+  ctx.quadraticCurveTo(x2, y2, x2 - r, y2);
+  ctx.lineTo(x1 + r, y2);
+  ctx.quadraticCurveTo(x1, y2, x1, y2 - r);
+  ctx.lineTo(x1, y1 + r);
+  ctx.quadraticCurveTo(x1, y1, x1 + r, y1);
+  ctx.closePath();
+  ctx.fillStyle = '#409eff';
+  ctx.fill();
+
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(x1 + 30, y1 + BTN.h / 2, 12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.font = '22px "Microsoft YaHei", sans-serif';
+  ctx.fillText('登 录', x1 + 54, y1 + BTN.h / 2 + 8);
+
+  // 记录按钮在视口中的 CSS 像素矩形，供验证脚本核对命中
+  window.__btn = {
+    x1: Math.round(ox + x1 * s), y1: Math.round(oy + y1 * s),
+    x2: Math.round(ox + x2 * s), y2: Math.round(oy + y2 * s),
+  };
+}
+
+window.addEventListener('resize', draw);
+cv.addEventListener('click', (e) => {
+  const b = window.__btn;
+  const hit = !!b && e.clientX >= b.x1 && e.clientX <= b.x2 &&
+              e.clientY >= b.y1 && e.clientY <= b.y2;
+  window.__hits.push({ x: e.clientX, y: e.clientY, hit });
+  if (hit) { document.title = 'HIT'; }
+});
+draw();
+</script>
+</body>
+</html>

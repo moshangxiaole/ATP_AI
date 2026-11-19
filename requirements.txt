@@ -1,0 +1,13 @@
+# 核心运行时（最小依赖已足够跑通 demo 与回放）
+pydantic>=2.6
+PyYAML>=6.0
+pillow>=10.0
+
+# 可选：按需安装，缺失时驱动会自动降级并给出提示
+# fastapi>=0.110        # HTTP API
+# uvicorn>=0.29
+# playwright>=1.44      # Web / Electron(CDP)
+# uiautomation>=2.0     # Windows 原生 UIA
+# pywinauto>=0.6.8      # Windows 备用
+# pyautogui>=0.9.54     # 桌面视觉兜底
+# opencv-python>=4.9    # 视觉模板匹配

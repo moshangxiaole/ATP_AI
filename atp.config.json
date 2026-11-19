@@ -1,0 +1,89 @@
+{
+  "artifacts_dir": "artifacts",
+  "cases_dir": "cases",
+  "default_timeout_ms": 15000,
+  "allow_healing": true,
+  "ai_step_budget": 200,
+  "ai_max_seconds": 600,
+  "ai_stall_steps": 6,
+  "model": {
+    "base_url": "",
+    "api_key": "",
+    "model": "",
+    "vision_model": "",
+    "temperature": 0.0,
+    "max_tokens": 2048,
+    "timeout_s": 60,
+    "vision": true,
+    "throttle": true,
+    "min_interval_ms": 1200,
+    "max_per_min": 20
+  },
+  "remote_providers": [
+    {
+      "name": "lan-rack",
+      "kind": "adb_tcp",
+      "platform": "android",
+      "hosts": []
+    },
+    {
+      "name": "farm",
+      "kind": "http_farm",
+      "platform": "android",
+      "base_url": "",
+      "token": ""
+    }
+  ],
+  "db_path": "data/atp.db",
+  "apps_path": "apps.json",
+  "vision": {
+    "enabled": true,
+    "threshold": 0.82,
+    "pad": 0.22,
+    "scale_range": 0.18,
+    "scale_steps": 7,
+    "capture_for_weak_nodes": true
+  },
+  "popup": {
+    "enabled": true,
+    "max_per_step": 3,
+    "settle_ms": 600,
+    "extra_close_words": []
+  },
+  "cold_start": {
+    "enabled": true,
+    "platforms": [
+      "android",
+      "harmony",
+      "ios"
+    ],
+    "settle_ms": 800,
+    "launch_settle_ms": 1800
+  },
+  "apps": {
+    "enabled": true,
+    "scan_pages": 6,
+    "scan_folders": 3,
+    "timeout_s": 90.0
+  },
+  "scroll_find": {
+    "enabled": true,
+    "platforms": [
+      "android",
+      "harmony",
+      "ios",
+      "desktop"
+    ],
+    "max_swipes": 12,
+    "settle_ms": 450,
+    "swipe_ms": 700,
+    "swipe_ratio": 0.35,
+    "edge_stop": 2,
+    "directions": [
+      "up",
+      "down"
+    ],
+    "horizontal": false,
+    "assume_scrollable": false
+  }
+}
